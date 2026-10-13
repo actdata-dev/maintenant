@@ -7,6 +7,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { useUpdatesStore } from '@/stores/updates'
 import { useAlertsStore } from '@/stores/alerts'
+import { useAgentsStore } from '@/stores/agents'
+import { isLocalAgent } from '@/services/apiFetch'
+import AgentBadge from '@/components/AgentBadge.vue'
 import { type ContainerUpdateDetail, fetchContainerUpdate } from '@/services/updateApi'
 import { type Alert } from '@/services/alertApi'
 import { useEdition } from '@/composables/useEdition'
@@ -27,6 +30,7 @@ const props = defineProps<{
 
 const updates = useUpdatesStore()
 const alertsStore = useAlertsStore()
+const agents = useAgentsStore()
 const detail = ref<ContainerUpdateDetail | null>(null)
 const loading = ref(true)
 const copied = ref(false)
@@ -43,18 +47,18 @@ const riskLevel = computed(() => {
   return 'low'
 })
 
-// L'alerte update active de ce conteneur. Le panel ne connaît que l'ExternalID,
-// mais l'alerte update porte le nom du conteneur (source='update') — on matche
-// par nom + source (au plus une alerte update active par conteneur).
+// Alerte update active de ce conteneur : même nom et même hôte (deux hôtes peuvent porter le même nom).
 const updateAlert = computed<Alert | undefined>(() => {
-  const name = detail.value?.container_name
-  if (!name) return undefined
+  const d = detail.value
+  const name = d?.container_name
+  if (!d || !name) return undefined
   const all = [
     ...alertsStore.activeAlerts.critical,
     ...alertsStore.activeAlerts.warning,
     ...alertsStore.activeAlerts.info,
   ]
-  return all.find((a) => a.source === 'update' && a.entity_name === name)
+  return all.find((a) => a.source === 'update' && a.entity_name === name &&
+    (isLocalAgent(a.agent_id) ? isLocalAgent(d.agent_id) : a.agent_id === d.agent_id))
 })
 
 async function loadDetail() {
@@ -135,6 +139,7 @@ onMounted(loadDetail)
     <div class="rounded-xl p-4 border" style="background: var(--mnt-bg-surface); border-color: var(--mnt-border-default)">
       <div class="mb-3 flex items-center justify-between gap-2">
         <h4 class="text-[10px] font-bold text-mnt-muted uppercase tracking-widest">Version</h4>
+        <AgentBadge v-if="agents.hasRemoteAgents" :agent-id="detail.agent_id" :hostname="detail.agent_hostname" :label="detail.agent_label" show-local />
         <AcknowledgeButton v-if="updateAlert" :alert="updateAlert" />
       </div>
       <div class="flex items-center gap-3">

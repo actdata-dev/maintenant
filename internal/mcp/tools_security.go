@@ -153,6 +153,7 @@ func listRiskScoresHandler(svc *Services) gomcp.ToolHandlerFor[listRiskScoresInp
 		type riskRow struct {
 			ContainerID   string `json:"container_id"`
 			ContainerName string `json:"container_name"`
+			AgentID       string `json:"agent_id"`
 			Image         string `json:"image"`
 			RiskScore     int    `json:"risk_score"`
 			RiskLevel     string `json:"risk_level"`
@@ -161,6 +162,7 @@ func listRiskScoresHandler(svc *Services) gomcp.ToolHandlerFor[listRiskScoresInp
 			return riskRow{
 				ContainerID:   u.ContainerID,
 				ContainerName: u.ContainerName,
+				AgentID:       u.AgentID,
 				Image:         u.Image,
 				RiskScore:     u.RiskScore,
 				RiskLevel:     string(update.RiskLevelFromScore(u.RiskScore)),
@@ -186,7 +188,11 @@ func listRiskScoresHandler(svc *Services) gomcp.ToolHandlerFor[listRiskScoresInp
 		for i, u := range updates {
 			rows[i] = toRow(u)
 		}
-		return jsonResult(rows)
+		enriched, err := enrichWithAgentLabel(ctx, svc, rows)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to enrich risk scores: %w", err)
+		}
+		return jsonResult(enriched)
 	}
 }
 

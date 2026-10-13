@@ -17,6 +17,8 @@ maintenant periodically scans the registry of each running container's image. Fo
 
 The scan covers the running containers that are not ignored (`maintenant.ignore`, which also works on a Swarm service) and not archived: those of the server's own runtime (Docker, Swarm, or the workloads of the Kubernetes cluster it runs in), and those of remote agents once they have reported since the server started. The server queries the registries itself, with its own network and credentials. Agents never do.
 
+On a multi-host install, each update belongs to the host of its container: the same container on three hosts gives three entries and three alerts, each naming its host.
+
 It leaves out:
 
 - images built locally, which the runtime reports as never pulled from nor pushed to a registry, whatever their name;

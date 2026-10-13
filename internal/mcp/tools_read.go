@@ -402,7 +402,11 @@ func getUpdatesHandler(svc *Services) gomcp.ToolHandlerFor[getUpdatesInput, any]
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to list updates: %w", err)
 		}
-		out := map[string]any{"updates": updates, "hosts": []map[string]any{}, "eol_table": eol.TableStatus{}}
+		enriched, err := enrichWithAgentLabel(ctx, svc, updates)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to enrich updates: %w", err)
+		}
+		out := map[string]any{"updates": enriched, "hosts": []map[string]any{}, "eol_table": eol.TableStatus{}}
 		if svc.EOL != nil {
 			hosts, err := svc.EOL.HostSupports(ctx)
 			if err != nil {

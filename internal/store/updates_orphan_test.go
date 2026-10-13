@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kolapsis/maintenant/internal/container"
+	"github.com/kolapsis/maintenant/internal/uid"
 	"github.com/kolapsis/maintenant/internal/update"
 )
 
@@ -90,7 +91,7 @@ func TestOrphanImageUpdates_SwarmTaskReplacedByDeploy(t *testing.T) {
 
 	// The name-based cleanup cannot see the replaced task: its name is gone from
 	// the scan set, so it is neither listed nor deleted.
-	stale, err := us.ListStaleImageUpdates(ctx, newScan, []string{"stack_api.1.newtask"})
+	stale, err := us.ListStaleImageUpdates(ctx, newScan, []string{uid.LocalAgent}, []string{"stack_api.1.newtask"})
 	require.NoError(t, err)
 	assert.Empty(t, stale, "the old task name is no longer scanned, so it never matches")
 

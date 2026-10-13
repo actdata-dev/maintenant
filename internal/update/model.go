@@ -70,6 +70,7 @@ type ImageUpdate struct {
 	ID                 string     `json:"id"`
 	ScanID             string     `json:"scan_id"`
 	ContainerID        string     `json:"container_id"`
+	AgentID            string     `json:"agent_id"`
 	ContainerName      string     `json:"container_name"`
 	Image              string     `json:"image"`
 	CurrentTag         string     `json:"current_tag"`
@@ -160,6 +161,7 @@ type ScanError struct {
 type StaleImageUpdate struct {
 	ContainerID   string
 	ContainerName string
+	AgentID       string
 	// ContainerUID is the maintenant id, filled for findings whose container is
 	// gone from the scan set and can no longer be looked up by the caller. Empty
 	// when the container row itself has been deleted.

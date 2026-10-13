@@ -4,6 +4,7 @@
 package v1
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -12,12 +13,29 @@ import (
 
 // RiskHandler handles risk score HTTP endpoints.
 type RiskHandler struct {
-	store update.UpdateStore
+	store          update.UpdateStore
+	agentDirectory AgentDirectory
 }
 
 // NewRiskHandler creates a new risk handler.
 func NewRiskHandler(store update.UpdateStore) *RiskHandler {
 	return &RiskHandler{store: store}
+}
+
+// SetAgentDirectory wires agent name resolution so the risk list can show each entry's host.
+func (h *RiskHandler) SetAgentDirectory(ad AgentDirectory) {
+	h.agentDirectory = ad
+}
+
+func (h *RiskHandler) agentNames(ctx context.Context) map[string]AgentName {
+	if h.agentDirectory == nil {
+		return nil
+	}
+	names, err := h.agentDirectory.AgentNames(ctx)
+	if err != nil {
+		return nil
+	}
+	return names
 }
 
 // HandleListRiskScores handles GET /api/v1/risk.
@@ -28,16 +46,19 @@ func (h *RiskHandler) HandleListRiskScores(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	names := h.agentNames(r.Context())
 	maxScore := 0
 	containers := make([]map[string]interface{}, 0, len(updates))
 	for _, u := range updates {
 		level := update.RiskLevelFromScore(u.RiskScore)
-		containers = append(containers, map[string]interface{}{
+		row := map[string]interface{}{
 			"container_id":   u.ContainerID,
 			"container_name": u.ContainerName,
 			"risk_score":     u.RiskScore,
 			"level":          string(level),
-		})
+		}
+		enrichAgentFields(row, u.AgentID, names)
+		containers = append(containers, row)
 		if u.RiskScore > maxScore {
 			maxScore = u.RiskScore
 		}

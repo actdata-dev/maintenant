@@ -692,13 +692,14 @@ CREATE TABLE image_updates (
     previous_digest TEXT,
     source_url    TEXT,
     status        TEXT NOT NULL DEFAULT 'available',
-    detected_at   BIGINT NOT NULL
+    detected_at   BIGINT NOT NULL,
+    agent_id      TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'
 );
 CREATE INDEX idx_image_updates_container_id ON image_updates(container_id);
 CREATE INDEX idx_image_updates_status ON image_updates(status);
 CREATE INDEX idx_image_updates_detected_at ON image_updates(detected_at);
 CREATE INDEX idx_image_updates_scan_id ON image_updates(scan_id);
-CREATE UNIQUE INDEX uq_image_updates_name_image_tag ON image_updates(container_name, image, latest_tag);
+CREATE UNIQUE INDEX uq_image_updates_agent_name_image_tag ON image_updates(agent_id, container_name, image, latest_tag);
 
 CREATE TABLE cve_cache (
     id            TEXT PRIMARY KEY NOT NULL,

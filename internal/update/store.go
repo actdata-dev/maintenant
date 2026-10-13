@@ -24,8 +24,8 @@ type UpdateStore interface {
 	ListImageUpdates(ctx context.Context, opts ListImageUpdatesOpts) ([]*ImageUpdate, error)
 	GetUpdateSummary(ctx context.Context) (*UpdateSummary, error)
 	DeleteImageUpdatesByContainer(ctx context.Context, containerID string) error
-	DeleteStaleImageUpdates(ctx context.Context, scanID string, scannedContainerNames []string) (int64, error)
-	ListStaleImageUpdates(ctx context.Context, scanID string, scannedContainerNames []string) ([]StaleImageUpdate, error)
+	DeleteStaleImageUpdates(ctx context.Context, scanID string, agentIDs, scannedContainerNames []string) (int64, error)
+	ListStaleImageUpdates(ctx context.Context, scanID string, agentIDs, scannedContainerNames []string) ([]StaleImageUpdate, error)
 	ListOrphanImageUpdates(ctx context.Context) ([]StaleImageUpdate, error)
 	DeleteOrphanImageUpdates(ctx context.Context) (int64, error)
 

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kolapsis/maintenant/internal/uid"
 	"github.com/kolapsis/maintenant/internal/update"
 )
 
@@ -71,11 +72,11 @@ func TestCleanupExpired_KeepsPendingUpdatesForTheNextScanToResolve(t *testing.T)
 	require.NotNil(t, pending, "an update still pending must survive the retention")
 
 	newScan := seedScan(t, us)
-	stale, err := us.ListStaleImageUpdates(ctx, newScan, []string{"web"})
+	stale, err := us.ListStaleImageUpdates(ctx, newScan, []string{uid.LocalAgent}, []string{"web"})
 	require.NoError(t, err)
-	assert.Equal(t, []update.StaleImageUpdate{{ContainerID: "ext-web", ContainerName: "web"}}, stale)
+	assert.Equal(t, []update.StaleImageUpdate{{ContainerID: "ext-web", ContainerName: "web", AgentID: uid.LocalAgent}}, stale)
 
-	deleted, err := us.DeleteStaleImageUpdates(ctx, newScan, []string{"web"})
+	deleted, err := us.DeleteStaleImageUpdates(ctx, newScan, []string{uid.LocalAgent}, []string{"web"})
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, deleted)
 }
@@ -107,4 +108,45 @@ func TestCleanupExpired_PurgesTheDigestBaselinesOfGoneContainers(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, b, "the baseline of %s must be purged", id)
 	}
+}
+
+func TestStaleImageUpdates_FilterByHost(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	us := NewUpdateStore(db)
+
+	oldScan := seedScan(t, us)
+	for _, agentID := range []string{uid.LocalAgent, "agent-nas", "agent-web"} {
+		_, err := us.InsertImageUpdate(ctx, &update.ImageUpdate{
+			ScanID: oldScan, AgentID: agentID, ContainerID: "ctr-valkey-" + agentID, ContainerName: "valkey",
+			Image: "valkey/valkey", CurrentTag: "8.0.1", Registry: "docker.io", LatestTag: "8.1.3",
+			UpdateType: update.UpdateTypeMinor, Status: update.StatusAvailable, DetectedAt: time.Now(),
+		})
+		require.NoError(t, err)
+	}
+	newScan := seedScan(t, us)
+	covered := []string{uid.LocalAgent, "agent-web"}
+
+	stale, err := us.ListStaleImageUpdates(ctx, newScan, nil, []string{"valkey"})
+	require.NoError(t, err)
+	assert.Empty(t, stale, "no covered host, nothing is stale")
+	deleted, err := us.DeleteStaleImageUpdates(ctx, newScan, nil, []string{"valkey"})
+	require.NoError(t, err)
+	assert.Zero(t, deleted)
+
+	stale, err = us.ListStaleImageUpdates(ctx, newScan, covered, []string{"valkey"})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []update.StaleImageUpdate{
+		{ContainerID: "ctr-valkey-" + uid.LocalAgent, ContainerName: "valkey", AgentID: uid.LocalAgent},
+		{ContainerID: "ctr-valkey-agent-web", ContainerName: "valkey", AgentID: "agent-web"},
+	}, stale)
+
+	deleted, err = us.DeleteStaleImageUpdates(ctx, newScan, covered, []string{"valkey"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, deleted)
+
+	kept, err := us.ListStaleImageUpdates(ctx, newScan, []string{"agent-nas"}, []string{"valkey"})
+	require.NoError(t, err)
+	assert.Equal(t, []update.StaleImageUpdate{{ContainerID: "ctr-valkey-agent-nas", ContainerName: "valkey", AgentID: "agent-nas"}}, kept,
+		"the uncovered host keeps its entry")
 }

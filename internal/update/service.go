@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kolapsis/maintenant/internal/event"
+	"github.com/kolapsis/maintenant/internal/uid"
 )
 
 // Enricher enriches raw scan results with CVE, changelog and risk data, as far as the running edition opens them.
@@ -422,7 +424,11 @@ func (s *Service) runScan(ctx context.Context) {
 		failed[se.ContainerName] = true
 	}
 	scannedNames := make([]string, 0, len(containers))
+	var coveredHosts []string
 	for _, c := range containers {
+		if host := uid.Agent(c.AgentID); !slices.Contains(coveredHosts, host) {
+			coveredHosts = append(coveredHosts, host)
+		}
 		if !failed[c.Name] {
 			scannedNames = append(scannedNames, c.Name)
 		}
@@ -439,6 +445,7 @@ func (s *Service) runScan(ctx context.Context) {
 		u := &ImageUpdate{
 			ScanID:         scanID,
 			ContainerID:    r.ContainerID,
+			AgentID:        containerByID[r.ContainerID].AgentID,
 			ContainerName:  r.ContainerName,
 			Image:          r.Image,
 			CurrentTag:     r.CurrentTag,
@@ -497,11 +504,11 @@ func (s *Service) runScan(ctx context.Context) {
 	// by this scan (container was upgraded and no longer has a pending update).
 	// Emit a recovery event for each so listening consumers (alert engine) can
 	// resolve the matching active alert.
-	staleUpdates, err := s.store.ListStaleImageUpdates(ctx, scanID, scannedNames)
+	// Only the hosts this scan covered are cleaned, so an absent host keeps its entries.
+	staleUpdates, err := s.store.ListStaleImageUpdates(ctx, scanID, coveredHosts, scannedNames)
 	if err != nil {
 		s.logger.Warn("update scan: list stale updates", "error", err)
-	}
-	if deleted, err := s.store.DeleteStaleImageUpdates(ctx, scanID, scannedNames); err != nil {
+	} else if deleted, err := s.store.DeleteStaleImageUpdates(ctx, scanID, coveredHosts, scannedNames); err != nil {
 		s.logger.Warn("update scan: cleanup stale updates", "error", err)
 	} else if deleted > 0 {
 		s.logger.Info("update scan: removed stale updates", "deleted", deleted)
@@ -529,15 +536,22 @@ func (s *Service) runScan(ctx context.Context) {
 	}
 
 	for _, su := range staleUpdates {
+		agentID := su.AgentID
+		if agentID == "" {
+			agentID = containerByID[su.ContainerID].AgentID
+		}
 		containerUID := su.ContainerUID
 		if containerUID == "" {
 			containerUID = containerByID[su.ContainerID].UID
+		}
+		if containerUID == "" {
+			containerUID = uid.Container(uid.Agent(agentID), su.ContainerID)
 		}
 		s.emitEvent(event.UpdateResolved, map[string]interface{}{
 			"container_id":   su.ContainerID,
 			"container_uid":  containerUID,
 			"container_name": su.ContainerName,
-			"agent_id":       containerByID[su.ContainerID].AgentID,
+			"agent_id":       agentID,
 		})
 	}
 

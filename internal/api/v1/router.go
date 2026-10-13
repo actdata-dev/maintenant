@@ -607,6 +607,9 @@ func (r *Router) registerUpdateRoutes(d HandlerDeps) {
 	}
 
 	uh := NewUpdateHandler(d.UpdateSvc, d.UpdateStore, d.ContainerAdapter)
+	if d.AgentStore != nil {
+		uh.SetAgentDirectory(agentStoreDirectory{store: d.AgentStore})
+	}
 	uh.SetHostOS(d.EOL, d.AgentSessions, agentStaleThreshold(d))
 	r.mux.HandleFunc("GET /api/v1/updates", uh.HandleListUpdates)
 	r.mux.HandleFunc("GET /api/v1/updates/summary", uh.HandleGetUpdateSummary)
@@ -630,6 +633,9 @@ func (r *Router) registerUpdateRoutes(d HandlerDeps) {
 
 	// Risk scoring routes; the history is the ?period= form of the per-container route.
 	rh := NewRiskHandler(d.UpdateStore)
+	if d.AgentStore != nil {
+		rh.SetAgentDirectory(agentStoreDirectory{store: d.AgentStore})
+	}
 	r.mux.HandleFunc("GET /api/v1/risk", requireCapability(extension.CapRiskScoring, rh.HandleListRiskScores))
 	r.mux.HandleFunc("GET /api/v1/risk/{container_id...}", requireCapability(extension.CapRiskScoring, rh.HandleGetContainerRisk))
 }

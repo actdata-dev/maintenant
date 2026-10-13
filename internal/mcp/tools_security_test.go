@@ -5,14 +5,20 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kolapsis/maintenant/internal/agent"
+	"github.com/kolapsis/maintenant/internal/container"
 	"github.com/kolapsis/maintenant/internal/extension"
 	"github.com/kolapsis/maintenant/internal/security"
 	"github.com/kolapsis/maintenant/internal/store"
+	"github.com/kolapsis/maintenant/internal/store/storetest"
+	"github.com/kolapsis/maintenant/internal/uid"
 	"github.com/kolapsis/maintenant/internal/update"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,4 +112,71 @@ func TestListCVE_Container_Evaluated(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, result.IsError)
 	assert.Contains(t, textFromContent(t, result.Content), `"evaluation":"evaluated"`)
+}
+
+func TestListRiskScores_CarriesTheHostOfEachRow(t *testing.T) {
+	withEdition(t, extension.Pro)
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db := storetest.Open(t, logger)
+
+	agentStore := store.NewAgentStore(db)
+	for _, ag := range []agent.Agent{
+		{AgentID: "agent-nas", Hostname: "nas-02", Label: "NAS cave", Status: "active", DetectedRuntime: "docker", CreatedAt: time.Now()},
+		{AgentID: "agent-web", Hostname: "web-07", Status: "active", DetectedRuntime: "docker", CreatedAt: time.Now()},
+	} {
+		require.NoError(t, agentStore.Insert(ctx, &ag))
+	}
+
+	containerStore := store.NewContainerStore(db)
+	updateStore := store.NewUpdateStore(db)
+	scanID, err := updateStore.InsertScanRecord(ctx, &update.ScanRecord{StartedAt: time.Now(), Status: update.ScanStatusCompleted})
+	require.NoError(t, err)
+	now := time.Now()
+	for externalID, agentID := range map[string]string{
+		"ctr-valkey-local": uid.LocalAgent,
+		"ctr-valkey-nas":   "agent-nas",
+		"ctr-valkey-web":   "agent-web",
+	} {
+		_, err := containerStore.InsertContainer(ctx, &container.Container{
+			ExternalID: externalID, AgentID: agentID, Name: "valkey", Image: "valkey/valkey:8.0.1",
+			State: container.StateRunning, AlertSeverity: container.SeverityWarning, RestartThreshold: 3,
+			RuntimeType: "docker", FirstSeenAt: now, LastStateChangeAt: now,
+		})
+		require.NoError(t, err)
+		_, err = updateStore.InsertImageUpdate(ctx, &update.ImageUpdate{
+			ScanID: scanID, ContainerID: externalID, AgentID: agentID, ContainerName: "valkey",
+			Image: "valkey/valkey:8.0.1", CurrentTag: "8.0.1", Registry: "registry-1.docker.io", LatestTag: "8.1.3",
+			UpdateType: update.UpdateTypeMinor, RiskScore: update.BaseRiskScore(update.UpdateTypeMinor),
+			Status: update.StatusAvailable, DetectedAt: now,
+		})
+		require.NoError(t, err)
+	}
+
+	svc := &Services{
+		Updates: update.NewService(update.Deps{
+			Store:      updateStore,
+			Scanner:    update.NewScanner(update.NewRegistryClient(), updateStore, logger),
+			Containers: noContainers{},
+			Logger:     logger,
+		}),
+		Agents: agentStore,
+		Logger: logger,
+	}
+
+	result, _, err := listRiskScoresHandler(svc)(ctx, nil, listRiskScoresInput{})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var rows []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(textFromContent(t, result.Content)), &rows))
+	got := map[string][2]any{}
+	for _, row := range rows {
+		got[row["container_id"].(string)] = [2]any{row["agent_id"], row["agent_label"]}
+	}
+	assert.Equal(t, map[string][2]any{
+		"ctr-valkey-local": {uid.LocalAgent, nil},
+		"ctr-valkey-nas":   {"agent-nas", "NAS cave"},
+		"ctr-valkey-web":   {"agent-web", "web-07"},
+	}, got)
 }

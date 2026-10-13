@@ -119,12 +119,15 @@ func TestMigratePostgres_ConcurrentCatchUp(t *testing.T) {
 		"ALTER TABLE containers ADD COLUMN swarm_service_mode TEXT NOT NULL DEFAULT '', ADD COLUMN swarm_desired_replicas INTEGER NOT NULL DEFAULT 0", // 37
 		"ALTER TABLE status_components DROP COLUMN override_before_maintenance",                                                                       // 38
 		"ALTER TABLE escalation_deliveries DROP CONSTRAINT escalation_deliveries_status_check, ADD CONSTRAINT escalation_deliveries_status_check CHECK(status IN ('pending','sent','failed','abandoned','skipped_maintenance'))", // 38
-		"DROP TABLE heartbeat_pauses",                                                                       // 39
-		"DROP INDEX idx_heartbeat_status_deadline",                                                          // 39
-		"ALTER TABLE heartbeats ADD COLUMN active INTEGER NOT NULL DEFAULT 1",                               // 39
-		"CREATE INDEX idx_heartbeat_status_deadline ON heartbeats(status, next_deadline_at) WHERE active=1", // 39
-		"CREATE INDEX idx_heartbeat_active ON heartbeats(active)",                                           // 39
-		"ALTER TABLE alerts DROP COLUMN agent_id",                                                           // 40
+		"DROP TABLE heartbeat_pauses",                                                                             // 39
+		"DROP INDEX idx_heartbeat_status_deadline",                                                                // 39
+		"ALTER TABLE heartbeats ADD COLUMN active INTEGER NOT NULL DEFAULT 1",                                     // 39
+		"CREATE INDEX idx_heartbeat_status_deadline ON heartbeats(status, next_deadline_at) WHERE active=1",       // 39
+		"CREATE INDEX idx_heartbeat_active ON heartbeats(active)",                                                 // 39
+		"ALTER TABLE alerts DROP COLUMN agent_id",                                                                 // 40
+		"DROP INDEX uq_image_updates_agent_name_image_tag",                                                        // 41
+		"ALTER TABLE image_updates DROP COLUMN agent_id",                                                          // 41
+		"CREATE UNIQUE INDEX uq_image_updates_name_image_tag ON image_updates(container_name, image, latest_tag)", // 41
 	} {
 		_, err = db.ReadDB().Exec(undo)
 		require.NoError(t, err, undo)

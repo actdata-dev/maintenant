@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,9 +104,9 @@ func (s *UpdateStore) InsertImageUpdate(ctx context.Context, u *update.ImageUpda
 		(id, scan_id, container_id, container_name, image, current_tag, current_digest, registry,
 		 latest_tag, latest_digest, update_type, risk_score, published_at,
 		 changelog_url, changelog_summary, has_breaking_changes, previous_digest, source_url,
-		 status, detected_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(container_name, image, latest_tag) DO UPDATE SET
+		 status, detected_at, agent_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(agent_id, container_name, image, latest_tag) DO UPDATE SET
 			scan_id=excluded.scan_id,
 			container_id=excluded.container_id,
 			current_tag=excluded.current_tag,
@@ -123,7 +124,7 @@ func (s *UpdateStore) InsertImageUpdate(ctx context.Context, u *update.ImageUpda
 		u.ID, u.ScanID, u.ContainerID, u.ContainerName, u.Image, u.CurrentTag, u.CurrentDigest, u.Registry,
 		u.LatestTag, u.LatestDigest, string(u.UpdateType), u.RiskScore, publishedAt,
 		u.ChangelogURL, u.ChangelogSummary, boolToInt(u.HasBreakingChanges), u.PreviousDigest, u.SourceURL,
-		string(u.Status), u.DetectedAt.Unix(),
+		string(u.Status), u.DetectedAt.Unix(), uid.Agent(u.AgentID),
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert image update: %w", err)
@@ -160,7 +161,7 @@ func (s *UpdateStore) GetImageUpdate(ctx context.Context, id string) (*update.Im
 		`SELECT id, scan_id, container_id, container_name, image, current_tag, current_digest, registry,
 		 latest_tag, latest_digest, update_type, risk_score, published_at,
 		 changelog_url, changelog_summary, has_breaking_changes, previous_digest, source_url,
-		 status, detected_at
+		 status, detected_at, agent_id
 		FROM image_updates WHERE id = ?`, id)
 	return scanImageUpdate(row)
 }
@@ -170,7 +171,7 @@ func (s *UpdateStore) GetImageUpdateByContainer(ctx context.Context, containerID
 		`SELECT id, scan_id, container_id, container_name, image, current_tag, current_digest, registry,
 		 latest_tag, latest_digest, update_type, risk_score, published_at,
 		 changelog_url, changelog_summary, has_breaking_changes, previous_digest, source_url,
-		 status, detected_at
+		 status, detected_at, agent_id
 		FROM image_updates WHERE container_id = ? ORDER BY detected_at DESC LIMIT 1`, containerID)
 	return scanImageUpdate(row)
 }
@@ -179,7 +180,7 @@ func (s *UpdateStore) ListImageUpdates(ctx context.Context, opts update.ListImag
 	query := `SELECT id, scan_id, container_id, container_name, image, current_tag, current_digest, registry,
 		 latest_tag, latest_digest, update_type, risk_score, published_at,
 		 changelog_url, changelog_summary, has_breaking_changes, previous_digest, source_url,
-		 status, detected_at
+		 status, detected_at, agent_id
 		FROM image_updates WHERE ` + liveContainerFilter
 	var args []interface{}
 
@@ -271,49 +272,39 @@ func (s *UpdateStore) DeleteImageUpdatesByContainer(ctx context.Context, contain
 	return nil
 }
 
-func (s *UpdateStore) DeleteStaleImageUpdates(ctx context.Context, scanID string, scannedContainerNames []string) (int64, error) {
-	if len(scannedContainerNames) == 0 {
+func (s *UpdateStore) DeleteStaleImageUpdates(ctx context.Context, scanID string, agentIDs, scannedContainerNames []string) (int64, error) {
+	if len(agentIDs) == 0 || len(scannedContainerNames) == 0 {
 		return 0, nil
 	}
-	placeholders := make([]string, len(scannedContainerNames))
-	args := make([]interface{}, 0, len(scannedContainerNames)+1)
-	args = append(args, scanID)
-	for i, name := range scannedContainerNames {
-		placeholders[i] = "?"
-		args = append(args, name)
-	}
-	query := fmt.Sprintf(
-		`DELETE FROM image_updates WHERE scan_id != ? AND container_name IN (%s)`,
-		strings.Join(placeholders, ","),
-	)
-	res, err := s.writer.Exec(ctx, query, args...)
+	where, args := staleFilter(scanID, agentIDs, scannedContainerNames)
+	res, err := s.writer.Exec(ctx, `DELETE FROM image_updates WHERE `+where, args...)
 	if err != nil {
 		return 0, fmt.Errorf("delete stale image updates: %w", err)
 	}
 	return res.RowsAffected, nil
 }
 
+func staleFilter(scanID string, agentIDs, names []string) (string, []any) {
+	args := make([]any, 0, 1+len(agentIDs)+len(names))
+	args = append(args, scanID)
+	for _, v := range slices.Concat(agentIDs, names) {
+		args = append(args, v)
+	}
+	in := func(n int) string { return strings.TrimSuffix(strings.Repeat("?,", n), ",") }
+	return `scan_id != ? AND agent_id IN (` + in(len(agentIDs)) + `) AND container_name IN (` + in(len(names)) + `)`, args
+}
+
 // ListStaleImageUpdates returns the containers that had a pending update before
 // this scan but are no longer in the latest results — i.e. containers that were
 // upgraded between scans. The container id is returned alongside the name so the
 // recovery event can resolve the alert by its real entity id.
-func (s *UpdateStore) ListStaleImageUpdates(ctx context.Context, scanID string, scannedContainerNames []string) ([]update.StaleImageUpdate, error) {
-	if len(scannedContainerNames) == 0 {
+func (s *UpdateStore) ListStaleImageUpdates(ctx context.Context, scanID string, agentIDs, scannedContainerNames []string) ([]update.StaleImageUpdate, error) {
+	if len(agentIDs) == 0 || len(scannedContainerNames) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(scannedContainerNames))
-	args := make([]interface{}, 0, len(scannedContainerNames)+1)
-	args = append(args, scanID)
-	for i, name := range scannedContainerNames {
-		placeholders[i] = "?"
-		args = append(args, name)
-	}
-	// #nosec G201 -- only "?" placeholders are interpolated; values are bound.
-	query := fmt.Sprintf(
-		`SELECT DISTINCT container_id, container_name FROM image_updates WHERE scan_id != ? AND container_name IN (%s)`,
-		strings.Join(placeholders, ","),
-	)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	where, args := staleFilter(scanID, agentIDs, scannedContainerNames)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT container_id, container_name, agent_id FROM image_updates WHERE `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list stale image updates: %w", err)
 	}
@@ -321,7 +312,7 @@ func (s *UpdateStore) ListStaleImageUpdates(ctx context.Context, scanID string, 
 	var stale []update.StaleImageUpdate
 	for rows.Next() {
 		var su update.StaleImageUpdate
-		if err := rows.Scan(&su.ContainerID, &su.ContainerName); err != nil {
+		if err := rows.Scan(&su.ContainerID, &su.ContainerName, &su.AgentID); err != nil {
 			return nil, err
 		}
 		stale = append(stale, su)
@@ -336,7 +327,7 @@ func (s *UpdateStore) ListStaleImageUpdates(ctx context.Context, scanID string, 
 // there, so the recovery event resolves the alert by its real entity id.
 func (s *UpdateStore) ListOrphanImageUpdates(ctx context.Context) ([]update.StaleImageUpdate, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT container_id, container_name,
+		`SELECT DISTINCT container_id, container_name, agent_id,
 			COALESCE((SELECT c.id FROM containers c
 				WHERE c.external_id = image_updates.container_id LIMIT 1), '')
 		FROM image_updates WHERE NOT `+liveContainerFilter)
@@ -347,7 +338,7 @@ func (s *UpdateStore) ListOrphanImageUpdates(ctx context.Context) ([]update.Stal
 	var orphans []update.StaleImageUpdate
 	for rows.Next() {
 		var su update.StaleImageUpdate
-		if err := rows.Scan(&su.ContainerID, &su.ContainerName, &su.ContainerUID); err != nil {
+		if err := rows.Scan(&su.ContainerID, &su.ContainerName, &su.AgentID, &su.ContainerUID); err != nil {
 			return nil, err
 		}
 		orphans = append(orphans, su)
@@ -803,17 +794,17 @@ func scanImageUpdate(row updateRowScanner) (*update.ImageUpdate, error) {
 	var u update.ImageUpdate
 	var publishedAt sql.NullInt64
 	var detectedAt int64
-	var updateType, status sql.NullString
+	var scanID, updateType, status sql.NullString
 	var latestTag, latestDigest sql.NullString
 	var changelogURL, changelogSummary, previousDigest, sourceURL sql.NullString
 	var hasBreakingChanges sql.NullBool
 
 	err := row.Scan(
-		&u.ID, &u.ScanID, &u.ContainerID, &u.ContainerName, &u.Image,
+		&u.ID, &scanID, &u.ContainerID, &u.ContainerName, &u.Image,
 		&u.CurrentTag, &u.CurrentDigest, &u.Registry,
 		&latestTag, &latestDigest, &updateType, &u.RiskScore, &publishedAt,
 		&changelogURL, &changelogSummary, &hasBreakingChanges, &previousDigest, &sourceURL,
-		&status, &detectedAt,
+		&status, &detectedAt, &u.AgentID,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -822,6 +813,7 @@ func scanImageUpdate(row updateRowScanner) (*update.ImageUpdate, error) {
 		return nil, err
 	}
 
+	u.ScanID = scanID.String
 	u.DetectedAt = time.Unix(detectedAt, 0)
 	if publishedAt.Valid {
 		t := time.Unix(publishedAt.Int64, 0)

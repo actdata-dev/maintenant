@@ -29,6 +29,7 @@ type UpdateHandler struct {
 	eolSvc         *eol.Service
 	sessions       AgentSessions
 	staleThreshold time.Duration
+	agentDirectory AgentDirectory
 }
 
 // NewUpdateHandler creates a new update handler.
@@ -36,11 +37,27 @@ func NewUpdateHandler(service *update.Service, store update.UpdateStore, contain
 	return &UpdateHandler{service: service, store: store, containers: containers}
 }
 
+// SetAgentDirectory wires agent name resolution so the update views can show each entry's host.
+func (h *UpdateHandler) SetAgentDirectory(ad AgentDirectory) {
+	h.agentDirectory = ad
+}
+
 // SetHostOS wires the host operating system support the updates surface serves.
 func (h *UpdateHandler) SetHostOS(svc *eol.Service, sessions AgentSessions, staleThreshold time.Duration) {
 	h.eolSvc = svc
 	h.sessions = sessions
 	h.staleThreshold = staleThreshold
+}
+
+func (h *UpdateHandler) agentNames(ctx context.Context) map[string]AgentName {
+	if h.agentDirectory == nil {
+		return nil
+	}
+	names, err := h.agentDirectory.AgentNames(ctx)
+	if err != nil {
+		return nil
+	}
+	return names
 }
 
 // HandleListHostOS handles GET /api/v1/updates/hosts.
@@ -80,9 +97,11 @@ func (h *UpdateHandler) HandleListUpdates(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	names := h.agentNames(r.Context())
 	updateMaps := make([]map[string]interface{}, 0, len(updates))
 	for _, u := range updates {
 		m := imageUpdateToMap(u)
+		enrichAgentFields(m, u.AgentID, names)
 		if u.Status == update.StatusPinned {
 			if pin, _ := h.store.GetVersionPin(r.Context(), u.ContainerID); pin != nil {
 				m["pin_reason"] = pin.Reason
@@ -165,6 +184,7 @@ func (h *UpdateHandler) HandleGetContainerUpdate(w http.ResponseWriter, r *http.
 	pin, _ := h.store.GetVersionPin(r.Context(), containerID)
 
 	resp := imageUpdateToMap(u)
+	enrichAgentFields(resp, u.AgentID, h.agentNames(r.Context()))
 	resp["pinned"] = pin != nil
 	if pin != nil {
 		resp["pin_reason"] = pin.Reason
@@ -279,16 +299,19 @@ func (h *UpdateHandler) HandleGetDryRun(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	names := h.agentNames(r.Context())
 	wouldUpdate := make([]map[string]interface{}, 0, len(updates))
 	for _, u := range updates {
-		wouldUpdate = append(wouldUpdate, map[string]interface{}{
+		row := map[string]interface{}{
 			"container_id":   u.ContainerID,
 			"container_name": u.ContainerName,
 			"image":          u.Image,
 			"current_tag":    u.CurrentTag,
 			"latest_tag":     u.LatestTag,
 			"update_type":    string(u.UpdateType),
-		})
+		}
+		enrichAgentFields(row, u.AgentID, names)
+		wouldUpdate = append(wouldUpdate, row)
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{

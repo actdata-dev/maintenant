@@ -7,6 +7,8 @@
 import { onMounted, onUnmounted, computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUpdatesStore } from '@/stores/updates'
+import { useAgentsStore } from '@/stores/agents'
+import AgentBadge from '@/components/AgentBadge.vue'
 import { useEdition } from '@/composables/useEdition'
 import { timeAgo } from '@/utils/time'
 import UpdateBadge from '@/components/UpdateBadge.vue'
@@ -44,6 +46,7 @@ const route = useRoute()
 const router = useRouter()
 const { edition } = useEdition()
 const updates = useUpdatesStore()
+const agents = useAgentsStore()
 
 const selectedUpdate = ref<ImageUpdate | null>(null)
 const slideOpen = ref(false)
@@ -334,6 +337,7 @@ onUnmounted(() => {
                   <p class="text-sm font-semibold text-mnt-primary group-hover:text-mnt-green-400 transition-colors truncate">
                     {{ u.container_name }}
                   </p>
+                  <AgentBadge v-if="agents.hasRemoteAgents" :agent-id="u.agent_id" :hostname="u.agent_hostname" :label="u.agent_label" show-local />
                   <UpdateBadge :update="u" />
                 </div>
                 <p class="text-[10px] text-mnt-muted mt-0.5 truncate">{{ u.image.split('@')[0] }}</p>

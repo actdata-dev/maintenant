@@ -21,6 +21,7 @@ import (
 
 	"github.com/kolapsis/maintenant/internal/agent"
 	"github.com/kolapsis/maintenant/internal/alert"
+	"github.com/kolapsis/maintenant/internal/container"
 	"github.com/kolapsis/maintenant/internal/eol"
 	"github.com/kolapsis/maintenant/internal/store"
 	"github.com/kolapsis/maintenant/internal/store/storetest"
@@ -277,4 +278,82 @@ func TestHandleCreateExclusion_ADuplicateAnswersWithTheStoredRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	assert.Equal(t, first["id"], stored[0].ID)
+}
+
+func TestUpdateRows_CarryTheirHost(t *testing.T) {
+	ctx := context.Background()
+	db := storetest.Open(t, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	agentStore := store.NewAgentStore(db)
+	for _, ag := range []agent.Agent{
+		{AgentID: "agent-nas", Hostname: "nas-02", Label: "NAS cave", Status: "active", DetectedRuntime: "docker", CreatedAt: time.Now()},
+		{AgentID: "agent-web", Hostname: "web-07", Status: "active", DetectedRuntime: "docker", CreatedAt: time.Now()},
+	} {
+		require.NoError(t, agentStore.Insert(ctx, &ag))
+	}
+
+	containerStore := store.NewContainerStore(db)
+	updateStore := store.NewUpdateStore(db)
+	scanID, err := updateStore.InsertScanRecord(ctx, &update.ScanRecord{StartedAt: time.Now(), Status: update.ScanStatusCompleted})
+	require.NoError(t, err)
+	now := time.Now()
+	for externalID, agentID := range map[string]string{
+		"ctr-valkey-local": uid.LocalAgent,
+		"ctr-valkey-nas":   "agent-nas",
+		"ctr-valkey-web":   "agent-web",
+	} {
+		_, err := containerStore.InsertContainer(ctx, &container.Container{
+			ExternalID: externalID, AgentID: agentID, Name: "valkey", Image: "valkey/valkey:8.0.1",
+			State: container.StateRunning, AlertSeverity: container.SeverityWarning, RestartThreshold: 3,
+			RuntimeType: "docker", FirstSeenAt: now, LastStateChangeAt: now,
+		})
+		require.NoError(t, err)
+		_, err = updateStore.InsertImageUpdate(ctx, &update.ImageUpdate{
+			ScanID: scanID, ContainerID: externalID, AgentID: agentID, ContainerName: "valkey",
+			Image: "valkey/valkey:8.0.1", CurrentTag: "8.0.1", Registry: "registry-1.docker.io", LatestTag: "8.1.3",
+			UpdateType: update.UpdateTypeMinor, RiskScore: update.BaseRiskScore(update.UpdateTypeMinor),
+			Status: update.StatusAvailable, DetectedAt: now,
+		})
+		require.NoError(t, err)
+	}
+
+	directory := agentStoreDirectory{store: agentStore}
+	uh := NewUpdateHandler(nil, updateStore, nil)
+	uh.SetAgentDirectory(directory)
+	rh := NewRiskHandler(updateStore)
+	rh.SetAgentDirectory(directory)
+
+	for _, tc := range []struct {
+		name, rowsKey string
+		handle        http.HandlerFunc
+	}{
+		{"dry-run", "would_update", uh.HandleGetDryRun},
+		{"risk", "containers", rh.HandleListRiskScores},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tc.handle(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+			require.Equal(t, http.StatusOK, rec.Code)
+
+			var body map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			var rows []map[string]any
+			require.NoError(t, json.Unmarshal(body[tc.rowsKey], &rows))
+
+			got := map[string]map[string]any{}
+			for _, row := range rows {
+				fields := map[string]any{}
+				for _, k := range []string{"agent_id", "agent_hostname", "agent_label"} {
+					if v, ok := row[k]; ok {
+						fields[k] = v
+					}
+				}
+				got[row["container_id"].(string)] = fields
+			}
+			assert.Equal(t, map[string]map[string]any{
+				"ctr-valkey-local": {},
+				"ctr-valkey-nas":   {"agent_id": "agent-nas", "agent_hostname": "nas-02", "agent_label": "NAS cave"},
+				"ctr-valkey-web":   {"agent_id": "agent-web", "agent_hostname": "web-07"},
+			}, got)
+		})
+	}
 }

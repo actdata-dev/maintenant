@@ -520,7 +520,7 @@ func updateDetectedAlert(m map[string]any, withChangelog bool) alert.Event {
 		Source:     "update",
 		AlertType:  "update_available",
 		Severity:   severity,
-		Message:    fmt.Sprintf("Update available for %s: %s", containerName, latestTag),
+		Message:    fmt.Sprintf("Update available for %s: %s", onHost(containerName, m), latestTag),
 		EntityType: "container",
 		EntityID:   entityID,
 		EntityName: containerName,
@@ -557,7 +557,7 @@ func updateResolvedAlert(m map[string]any) alert.Event {
 		AlertType:  "update_available",
 		Severity:   alert.SeverityInfo,
 		IsRecover:  true,
-		Message:    fmt.Sprintf("Update no longer required for %s", containerName),
+		Message:    fmt.Sprintf("Update no longer required for %s", onHost(containerName, m)),
 		EntityType: "container",
 		EntityID:   entityID,
 		EntityName: containerName,
@@ -577,9 +577,11 @@ func (a *App) wireUpdateCallback() {
 	}
 
 	a.updateSvc.SetEventCallback(func(eventType string, data any) {
-		a.broker.Broadcast(v1.SSEEvent{Type: eventType, Data: data})
-
 		m, ok := data.(map[string]any)
+		if id := agentIDOf(m); ok && id != "" && id != uid.LocalAgent {
+			m["agent_name"] = a.agentName(ctx, id)
+		}
+		a.broker.Broadcast(v1.SSEEvent{Type: eventType, Data: data})
 		if !ok {
 			return
 		}
@@ -597,6 +599,24 @@ func (a *App) wireUpdateCallback() {
 			}
 		}
 	})
+}
+
+// agentName returns the label of an agent, else its hostname, else its id.
+func (a *App) agentName(ctx context.Context, agentID string) string {
+	if a.agentStore == nil {
+		return agentID
+	}
+	ag, err := a.agentStore.Get(ctx, agentID)
+	if err != nil || ag == nil {
+		return agentID
+	}
+	if ag.Label != "" {
+		return ag.Label
+	}
+	if ag.Hostname != "" {
+		return ag.Hostname
+	}
+	return agentID
 }
 
 // wirePostureCallbacks wires the security posture scoring callbacks.
@@ -724,16 +744,7 @@ func (a *App) wireAgentLifecycleAlerts() {
 			return
 		}
 
-		name := agentID
-		if ag, err := a.agentStore.Get(ctx, agentID); err == nil && ag != nil {
-			if ag.Label != "" {
-				name = ag.Label
-			} else if ag.Hostname != "" {
-				name = ag.Hostname
-			}
-		}
-
-		evt := agentLifecycleEvent(agentID, name, reason, connected)
+		evt := agentLifecycleEvent(agentID, a.agentName(ctx, agentID), reason, connected)
 		evt.Timestamp = time.Now()
 
 		alertCh <- evt
@@ -798,6 +809,13 @@ func (a *App) startOSEOL(ctx context.Context) {
 			a.logger.Error("os end-of-support service stopped", "error", err)
 		}
 	}()
+}
+
+func onHost(containerName string, m map[string]any) string {
+	if host, _ := m["agent_name"].(string); host != "" {
+		return containerName + " on " + host
+	}
+	return containerName
 }
 
 func agentIDOf(m map[string]any) string {

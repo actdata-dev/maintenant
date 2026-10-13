@@ -64,10 +64,10 @@ func (s *stubStore) ListImageUpdates(_ context.Context, _ ListImageUpdatesOpts) 
 }
 func (s *stubStore) GetUpdateSummary(_ context.Context) (*UpdateSummary, error)      { return nil, nil }
 func (s *stubStore) DeleteImageUpdatesByContainer(_ context.Context, _ string) error { return nil }
-func (s *stubStore) DeleteStaleImageUpdates(_ context.Context, _ string, _ []string) (int64, error) {
+func (s *stubStore) DeleteStaleImageUpdates(_ context.Context, _ string, _, _ []string) (int64, error) {
 	return 0, nil
 }
-func (s *stubStore) ListStaleImageUpdates(_ context.Context, _ string, _ []string) ([]StaleImageUpdate, error) {
+func (s *stubStore) ListStaleImageUpdates(_ context.Context, _ string, _, _ []string) ([]StaleImageUpdate, error) {
 	return nil, nil
 }
 func (s *stubStore) ListOrphanImageUpdates(_ context.Context) ([]StaleImageUpdate, error) {
