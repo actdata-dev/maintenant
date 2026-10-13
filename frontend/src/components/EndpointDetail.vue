@@ -19,6 +19,7 @@ import { fetchEndpointDailyUptime, type UptimeDay } from '@/services/uptimeApi'
 import { useEndpointsStore } from '@/stores/endpoints'
 import { useConfirm } from '@/composables/useConfirm'
 import { timeAgo } from '@/utils/time'
+import { endpointStaleBadge } from '@/utils/endpointTone'
 import EndpointStatusBadge from './EndpointStatusBadge.vue'
 import EndpointEventTimeline from './EndpointEventTimeline.vue'
 import AgentBadge from './AgentBadge.vue'
@@ -210,9 +211,9 @@ watch(() => props.endpointId, () => {
         <span
           v-if="isOffline"
           class="rounded-full px-2 py-0.5 text-xs font-medium text-mnt-sev-unknown bg-mnt-sev-unknown"
-          :title="`Agent offline · last known: ${endpoint.status}`"
+          :title="endpointStaleBadge(endpoint).title"
         >
-          offline
+          {{ endpointStaleBadge(endpoint).text }}
         </span>
         <EndpointStatusBadge v-else :status="endpoint.status" />
         <span

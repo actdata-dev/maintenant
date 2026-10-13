@@ -23,7 +23,7 @@ import DataTable, { type Column } from '@/components/ui/DataTable.vue'
 import EndpointStatusBadge from '@/components/EndpointStatusBadge.vue'
 import type { StatusChip } from '@/components/ui/listFilters'
 import { usePreferencesStore } from '@/stores/preferences'
-import { endpointTone } from '@/utils/endpointTone'
+import { endpointStaleBadge, endpointTone } from '@/utils/endpointTone'
 import { timeAgo } from '@/utils/time'
 import { docUrl } from '@/utils/docs'
 import QuotaRefusal from '@/components/QuotaRefusal.vue'
@@ -395,8 +395,8 @@ onUnmounted(() => {
           <span
             v-if="row.stale"
             class="rounded-full bg-mnt-sev-unknown px-2 py-0.5 text-xs font-medium text-mnt-sev-unknown"
-            :title="`Agent offline · last known: ${row.status}`"
-          >offline</span>
+            :title="endpointStaleBadge(row).title"
+          >{{ endpointStaleBadge(row).text }}</span>
           <EndpointStatusBadge v-else :status="row.status" />
         </template>
         <template #cell-response="{ row }">

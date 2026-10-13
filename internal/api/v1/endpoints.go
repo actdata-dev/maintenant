@@ -25,9 +25,7 @@ type EndpointHandler struct {
 	sessions     agentLiveness
 }
 
-// enrichedEndpoint adds presentation-only liveness flags to an endpoint. When an
-// endpoint is probed by a remote agent whose stream is gone, its last result is
-// no longer live, so the UI degrades it to offline.
+// enrichedEndpoint adds presentation-only liveness flags telling the UI the status is last-known, not live.
 type enrichedEndpoint struct {
 	*endpoint.Endpoint
 	Stale        *bool `json:"stale,omitempty"`
@@ -39,18 +37,24 @@ func NewEndpointHandler(service *endpoint.Service, containerSvc *container.Servi
 	return &EndpointHandler{service: service, containerSvc: containerSvc}
 }
 
-// SetAgentSessions wires live agent-stream state so agent-probed endpoints can be
-// flagged stale when their reporting agent disconnects. Server-probed endpoints
-// (no agent) are unaffected.
+// SetAgentSessions wires live agent-stream state so agent-probed endpoints are flagged stale when their reporting agent disconnects.
 func (h *EndpointHandler) SetAgentSessions(s agentLiveness) {
 	h.sessions = s
 }
 
-// markStale wraps an endpoint, flagging it stale when its remote agent is offline.
+// markStale wraps an endpoint, flagging it stale when its remote agent is offline or the server has not checked it for three intervals.
 func (h *EndpointHandler) markStale(ep *endpoint.Endpoint) enrichedEndpoint {
 	ee := enrichedEndpoint{Endpoint: ep}
-	if ep.AgentID != "" && ep.AgentID != uid.LocalAgent && h.sessions != nil && !h.sessions.IsConnected(ep.AgentID) {
-		t := true
+	t := true
+	if ep.AgentID == "" || ep.AgentID == uid.LocalAgent {
+		interval := time.Duration(ep.Config.Interval)
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
+		if ep.LastCheckAt != nil && time.Since(*ep.LastCheckAt) > 3*interval {
+			ee.Stale = &t
+		}
+	} else if h.sessions != nil && !h.sessions.IsConnected(ep.AgentID) {
 		ee.Stale = &t
 		ee.AgentOffline = &t
 	}

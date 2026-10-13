@@ -10,6 +10,7 @@ import { deleteEndpoint } from '@/services/endpointApi'
 import { fetchEndpointDailyUptime, type UptimeDay } from '@/services/uptimeApi'
 import { useConfirm } from '@/composables/useConfirm'
 import { timeAgo } from '@/utils/time'
+import { endpointStaleBadge } from '@/utils/endpointTone'
 import EndpointStatusBadge from './EndpointStatusBadge.vue'
 import AgentBadge from './AgentBadge.vue'
 import UptimeBar90 from './ui/UptimeBar90.vue'
@@ -135,9 +136,9 @@ function formatResponseTime(ms: number | undefined): string {
         <span
           v-if="endpoint.stale"
           class="rounded-full px-2 py-0.5 text-xs font-medium text-mnt-sev-unknown bg-mnt-sev-unknown"
-          :title="`Agent offline · last known: ${endpoint.status}`"
+          :title="endpointStaleBadge(endpoint).title"
         >
-          offline
+          {{ endpointStaleBadge(endpoint).text }}
         </span>
         <EndpointStatusBadge v-else :status="endpoint.status" />
       </div>

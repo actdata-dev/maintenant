@@ -149,6 +149,7 @@ export const useEndpointsStore = defineStore('endpoints', () => {
     if (idx >= 0) {
       endpoints.value[idx] = {
         ...endpoints.value[idx]!,
+        ...(endpoints.value[idx]!.agent_offline ? {} : { stale: false }),
         status: data.new_status,
         last_response_time_ms: data.response_time_ms,
         last_http_status: data.http_status,

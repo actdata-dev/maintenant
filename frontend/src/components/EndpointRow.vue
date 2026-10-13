@@ -8,7 +8,7 @@ import { computed, onMounted, ref } from 'vue'
 import type { Endpoint } from '@/services/endpointApi'
 import { fetchEndpointDailyUptime, type UptimeDay } from '@/services/uptimeApi'
 import { timeAgo } from '@/utils/time'
-import { endpointTone } from '@/utils/endpointTone'
+import { endpointStaleBadge, endpointTone } from '@/utils/endpointTone'
 import ListRow from '@/components/ui/ListRow.vue'
 import UptimeBar90 from '@/components/ui/UptimeBar90.vue'
 import EndpointStatusBadge from '@/components/EndpointStatusBadge.vue'
@@ -68,8 +68,8 @@ function formatResponseTime(ms: number | undefined): string {
         <span
           v-if="endpoint.stale"
           class="rounded-full bg-mnt-sev-unknown px-2 py-0.5 text-[11px] font-medium text-mnt-sev-unknown"
-          :title="`Agent offline, last known: ${endpoint.status}`"
-        >offline</span>
+          :title="endpointStaleBadge(endpoint).title"
+        >{{ endpointStaleBadge(endpoint).text }}</span>
         <EndpointStatusBadge v-else :status="endpoint.status" />
       </div>
 

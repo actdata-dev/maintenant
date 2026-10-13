@@ -131,6 +131,8 @@ labels:
 
 A `degraded` result counts as a success for both thresholds and for uptime. It raises its own `certificate_untrusted` alert at Warning severity.
 
+An endpoint the server probes but has not checked for more than three intervals is shown as `stale` ("Not checked recently") instead of its last status. This is display only and raises no alert.
+
 ---
 
 ## Uptime History and Sparklines

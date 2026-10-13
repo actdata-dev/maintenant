@@ -167,7 +167,7 @@ For detailed Kubernetes configuration and all Helm values, see the [Kubernetes G
 
 | Tool | Minimum Version |
 |------|----------------|
-| Go | >= 1.26.6 |
+| Go | >= 1.26.9 |
 | Node.js | `^20.19.0` or `>= 22.12.0` |
 | CGO | Enabled, with a C compiler (SQLite) |
 | Docker | For testing |

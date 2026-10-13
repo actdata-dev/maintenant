@@ -59,7 +59,7 @@ function containerStatus(c: Container): { status: UnifiedStatus; label: string }
 }
 
 function endpointStatus(e: Endpoint): { status: UnifiedStatus; label: string } {
-  if (e.stale) return { status: 'unknown', label: 'Agent offline' }
+  if (e.stale) return { status: 'unknown', label: e.agent_offline ? 'Agent offline' : 'Not checked recently' }
   if (e.status === 'up') return { status: 'ok', label: 'Up' }
   if (e.status === 'down') return { status: 'down', label: 'Down' }
   // Reachable, but its certificate is not trusted.

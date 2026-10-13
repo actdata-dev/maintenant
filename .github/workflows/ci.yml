@@ -231,23 +231,22 @@ jobs:
     # The store suite runs twice: once on SQLite, once on PostgreSQL. The same
     # business assertions must hold on both engines (SC-002), and the schema
     # equivalence test needs a real server to introspect.
-    services:
-      postgres:
-        image: postgres:14-alpine
-        env:
-          POSTGRES_PASSWORD: ci-test-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
+
+      # A step, not a service: harden-runner restarts Docker, which stops service containers.
+      - name: Start PostgreSQL
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=ci-test-password -p 5432:5432 postgres:14-alpine
+          for _ in $(seq 30); do
+            docker exec postgres pg_isready -h 127.0.0.1 -U postgres && exit 0
+            sleep 2
+          done
+          docker logs postgres
+          exit 1
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -310,23 +309,24 @@ jobs:
       fail-fast: false
       matrix:
         postgres: ["16", "17"]
-    services:
-      postgres:
-        image: postgres:${{ matrix.postgres }}-alpine
-        env:
-          POSTGRES_PASSWORD: ci-test-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
+
+      # A step, not a service: harden-runner restarts Docker, which stops service containers.
+      - name: Start PostgreSQL
+        env:
+          POSTGRES_VERSION: ${{ matrix.postgres }}
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=ci-test-password -p 5432:5432 "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 30); do
+            docker exec postgres pg_isready -h 127.0.0.1 -U postgres && exit 0
+            sleep 2
+          done
+          docker logs postgres
+          exit 1
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -516,5 +516,18 @@ jobs:
       - name: Unit tests (vitest)
         run: npx --no-install vitest run
 
+      # Same policy as govulncheck and Trivy: block on high/critical advisories
+      # with a non-breaking fix, report-only for the rest.
       - name: npm audit
-        run: npm audit --audit-level=high
+        run: |
+          npm audit --json > /tmp/npm-audit.json || true
+          jq -r '
+            [.vulnerabilities | to_entries[] | .value
+              | select(.severity == "high" or .severity == "critical")
+              | {name, fixable: (.fixAvailable == true or (.fixAvailable | type == "object" and .isSemVerMajor == false))}] as $v
+            | ($v | map(select(.fixable) | .name)) as $blocking
+            | ($v | map(select(.fixable | not) | .name)) as $reportonly
+            | "high/critical, no non-breaking fix (report-only): \($reportonly)",
+              "high/critical, fixable (blocking): \($blocking)",
+              (if $blocking != [] then "fixable vulnerabilities present" | halt_error(1) else empty end)
+          ' /tmp/npm-audit.json

@@ -23,8 +23,8 @@ export interface Endpoint {
   container_name: string
   external_id: string
   endpoint_type: 'http' | 'tcp'
-  // Set by the server when the probing agent has no live stream: the status
-  // below is last-known, not live. The UI degrades it to offline.
+  // Set by the server when the status below is last-known, not live: probing agent
+  // offline (agent_offline) or no check for three intervals.
   stale?: boolean
   agent_offline?: boolean
   target: string

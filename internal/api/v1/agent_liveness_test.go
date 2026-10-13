@@ -43,5 +43,5 @@ func TestEndpointHandler_markStale(t *testing.T) {
 	assert.Nil(t, local.Stale, "local endpoint is not agent-governed")
 
 	serverProbed := h.markStale(&endpoint.Endpoint{AgentID: ""})
-	assert.Nil(t, serverProbed.Stale, "server-probed endpoint (no agent) is never stale")
+	assert.Nil(t, serverProbed.Stale, "server-probed endpoint without check history is not stale")
 }

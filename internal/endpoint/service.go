@@ -119,9 +119,17 @@ func (s *Service) SetEndpointRemovedCallback(cb EndpointRemovedCallback) {
 	s.onEndpointRemoved = cb
 }
 
-// Start begins the check engine and stores the context for adding endpoints later.
+// Start stores the context for adding endpoints later and resumes checks of the active standalone endpoints.
 func (s *Service) Start(ctx context.Context) {
 	s.ctx = ctx
+	eps, err := s.store.ListEndpoints(ctx, ListEndpointsOpts{Source: string(SourceStandalone)})
+	if err != nil {
+		s.logger.Error("load standalone endpoints", "error", err)
+		return
+	}
+	for _, ep := range eps {
+		s.engine.AddEndpoint(ctx, ep)
+	}
 }
 
 // Stop shuts down the check engine.
