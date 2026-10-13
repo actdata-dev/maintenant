@@ -103,10 +103,14 @@ func CheckHTTP(ctx context.Context, ep *Endpoint, logger interface{ Warn(string,
 		_ = Body.Close()
 	}(resp.Body)
 
-	// Extract TLS peer certificates for certificate auto-detection
-	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
-		result.TLSPeerCertificates = resp.TLS.PeerCertificates
-		result.TLSOCSPResponse = resp.TLS.OCSPResponse
+	// Keep the target's certificate, not the one of a host a redirect landed on.
+	first := resp
+	for first.Request != nil && first.Request.Response != nil {
+		first = first.Request.Response
+	}
+	if first.TLS != nil && len(first.TLS.PeerCertificates) > 0 {
+		result.TLSPeerCertificates = first.TLS.PeerCertificates
+		result.TLSOCSPResponse = first.TLS.OCSPResponse
 	}
 
 	statusCode := resp.StatusCode
